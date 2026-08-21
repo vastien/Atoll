@@ -90,13 +90,13 @@ struct MinimalisticMusicPlayerView: View {
                             MinimalisticAlbumArtView(vm: vm, albumArtNamespace: albumArtNamespace)
                                 .frame(width: albumArtWidth, height: albumArtWidth)
 
-                            VStack(alignment: .leading, spacing: 1) {
+                            VStack(alignment: .leading, spacing: 2) {
                                 if !musicManager.songTitle.isEmpty {
                                     MusicTitleMarqueeView(
                                         text: musicManager.songTitle,
                                         isExplicit: musicManager.isCurrentTrackExplicit,
-                                        font: .system(size: 12, weight: .semibold),
-                                        nsFont: .subheadline,
+                                        font: .system(size: 13, weight: .semibold),
+                                        nsFont: .headline,
                                         textColor: .white,
                                         frameWidth: textWidth,
                                         badgeHeight: 13
@@ -104,7 +104,7 @@ struct MinimalisticMusicPlayerView: View {
                                 }
 
                                 Text(musicManager.artistName)
-                                    .font(.system(size: 10, weight: .regular))
+                                    .font(.system(size: 11, weight: .regular))
                                     .foregroundColor(Defaults[.playerColorTinting] ? Color(nsColor: musicManager.avgColor).ensureMinimumBrightness(factor: 0.6) : .gray)
                                     .lineLimit(1)
 
@@ -130,20 +130,20 @@ struct MinimalisticMusicPlayerView: View {
 
                 // Compact progress bar
                 progressBar
-                    .padding(.top, batteryOffNotchMode ? 4 : 6)
+                    .padding(.top, batteryOffNotchMode ? Metrics.gapAboveProgressCompact : Metrics.gapAboveProgress)
                 
                 // Compact playback controls
                 if shouldShowControlHUDRow {
                     controlHUDRow
-                        .padding(.top, 4)
+                        .padding(.top, Metrics.gapAboveControls)
                 } else {
                     playbackControls
-                        .padding(.top, 4)
+                        .padding(.top, Metrics.gapAboveControls)
                 }
 
                 if enableLyrics {
                     lyricsView
-                        .padding(.top, 10)
+                        .padding(.top, Metrics.gapAboveLyrics)
                 }
 
                 timerCountdownSection
@@ -271,17 +271,40 @@ struct MinimalisticMusicPlayerView: View {
         !showMinimalisticBatteryIndicator && !shouldUseDynamicIslandMode(for: vm.screen)
     }
 
+    /// The player's vertical rhythm, in one place.
+    ///
+    /// The layout and `calculateDynamicHeight` were describing it separately and
+    /// had drifted: the height counted 4pt for a progress row that draws 14, and
+    /// 2pt of gap above controls that carried 6. The container is a fixed frame
+    /// aligned to the top, so the missing ~14pt came out of the bottom and the
+    /// whole stack read as squashed.
+    private enum Metrics {
+        static let header: CGFloat = 50
+        /// The notch-hugging header pulls the artwork up out of flow, so only
+        /// the title and artist are left taking height.
+        static let notchHuggingHeader: CGFloat = 26
+        /// `MusicSliderView` at these track heights, plus its inline time labels.
+        static let progressRow: CGFloat = 14
+        static let controlsRow: CGFloat = 54
+        static let lyricsRow: CGFloat = 34
+
+        static let gapAboveProgress: CGFloat = 10
+        static let gapAboveProgressCompact: CGFloat = 8
+        static let gapAboveControls: CGFloat = 8
+        static let gapAboveLyrics: CGFloat = 10
+    }
+
     private func calculateDynamicHeight() -> CGFloat {
         let isDynamicIsland = shouldUseDynamicIslandMode(for: vm.screen)
 
         if !batteryOffNotchMode {
             // ── Battery ON / DI: use the exact original height formula ──
-            var height: CGFloat = 50 // header
-            height += 6 + 4          // progress bar top padding + bar
-            height += 54 + 2         // controls + top padding
+            var height: CGFloat = Metrics.header
+            height += Metrics.gapAboveProgress + Metrics.progressRow
+            height += Metrics.gapAboveControls + Metrics.controlsRow
 
             if enableLyrics {
-                height += 10 + 34 // lyrics padding + estimated height
+                height += Metrics.gapAboveLyrics + Metrics.lyricsRow
             }
             if shouldShowTimerCountdown {
                 height += minimalisticTimerCountdownBlockHeight
@@ -298,12 +321,12 @@ struct MinimalisticMusicPlayerView: View {
         // ── Battery OFF (notch mode): tighter height for U-shaped layout ──
         // The album art is pulled UP into the notch header area, so the
         // visible header in-flow is only the title + artist text (~26pt).
-        var height: CGFloat = 26 // reduced header (text only; art overlaps upward)
-        height += 4 + 4          // progress bar top padding + bar
-        height += 54 + 2         // controls + top padding
+        var height: CGFloat = Metrics.notchHuggingHeader
+        height += Metrics.gapAboveProgressCompact + Metrics.progressRow
+        height += Metrics.gapAboveControls + Metrics.controlsRow
 
         if enableLyrics {
-            height += 10 + 34
+            height += Metrics.gapAboveLyrics + Metrics.lyricsRow
         }
         if shouldShowTimerCountdown {
             height += minimalisticTimerCountdownBlockHeight
@@ -356,7 +379,7 @@ struct MinimalisticMusicPlayerView: View {
                 }
 
                 // ── Center: Title + Artist (below the notch) ──
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 2) {
                     if !musicManager.songTitle.isEmpty {
                         // In the U-shaped layout the visualizer sits in a 48-pt wide zone
                         // (matching the time text) and has a 12-pt right spacer inside it.
@@ -364,8 +387,8 @@ struct MinimalisticMusicPlayerView: View {
                         MusicTitleMarqueeView(
                             text: musicManager.songTitle,
                             isExplicit: musicManager.isCurrentTrackExplicit,
-                            font: .system(size: 12, weight: .semibold),
-                            nsFont: .subheadline,
+                            font: .system(size: 13, weight: .semibold),
+                            nsFont: .headline,
                             textColor: .white,
                             frameWidth: textAreaWidth,
                             badgeHeight: 13
@@ -373,7 +396,7 @@ struct MinimalisticMusicPlayerView: View {
                     }
 
                     Text(musicManager.artistName)
-                        .font(.system(size: 10, weight: .regular))
+                        .font(.system(size: 11, weight: .regular))
                         .foregroundColor(Defaults[.playerColorTinting] ? Color(nsColor: musicManager.avgColor).ensureMinimumBrightness(factor: 0.6) : .gray)
                         .lineLimit(1)
                 }
@@ -820,7 +843,6 @@ private struct MinimalisticReminderDetailsView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .center)
-        .padding(.top, 2)
     }
 
     private var shouldShowControlHUDRow: Bool {
