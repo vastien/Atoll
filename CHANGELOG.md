@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Choose the media source from the notch**: the little app badge on the album art is now a menu for picking which player the notch controls. Several apps can be sounding at once and "Now Playing" follows whichever touched the system last, so starting a video used to take the controls away from the music you were steering. Naming a source pins it; "Now Playing (follows the active app)" restores the old behaviour. It sets the same preference as Settings, so the two stay in step.
+
 - Spotify "Like Song" media control: save or remove the current track from your Liked Songs directly from the notch, lock screen, and minimalist player, using the official Spotify Web API (OAuth 2.0 PKCE). Add the control to any media slot in settings. (#579)
 
 - Show the current Claude subscription plan (e.g. `Max 5x`) as a badge next to the Claude card title in the LLM Usage view (#684).

@@ -332,21 +332,25 @@ struct AlbumArtView: View {
 
     private var albumArtButton: some View {
         ZStack {
-            Button {
-                musicManager.openMusicApp()
-            } label: {
-                ZStack(alignment:.bottomTrailing) {
+            // The badge sits beside the artwork button rather than inside its
+            // label: a button's label is not interactive, and the badge now has
+            // a job of its own. The shared modifiers stay on the enclosing
+            // stack so both still flip, scale and tilt together.
+            ZStack(alignment: .bottomTrailing) {
+                Button {
+                    musicManager.openMusicApp()
+                } label: {
                     albumArtImage
-                    appIconOverlay
                 }
-                .albumArtFlip(angle: musicManager.flipAngle)
-                .parallax3D()
-                .padding(.bottom, -5)
+                .buttonStyle(PlainButtonStyle())
 
+                appIconOverlay
             }
-            .buttonStyle(PlainButtonStyle())
             .scaleEffect(musicManager.isPlaying ? 1 : 0.85)
-            
+            .albumArtFlip(angle: musicManager.flipAngle)
+            .parallax3D()
+            .padding(.bottom, -5)
+
             albumArtDarkOverlay
         }
     }
@@ -375,10 +379,7 @@ struct AlbumArtView: View {
     @ViewBuilder
     private var appIconOverlay: some View {
         if vm.notchState == .open && !musicManager.usingAppIconForArtwork {
-            AppIcon(for: musicManager.bundleIdentifier ?? "com.apple.Music")
-                .resizable()
-                .scaledToFill()
-                .frame(width: 36, height: 36)
+            MediaSourceMenu(size: 36)
                 .offset(x: 10, y: 10)
                 .transition(.scale.combined(with: .opacity).animation(.bouncy.delay(0.3)))
                 .zIndex(2)
