@@ -24,29 +24,71 @@ enum SpotifyTokenAccount: String {
     case refreshToken = "spotify-library-refresh-token"
 }
 
+/// Serialises Keychain access, and keeps it off the main actor.
+///
+/// `SecItemCopyMatching` and its siblings are synchronous round trips to
+/// `securityd`. When the calling binary's code signature does not match the
+/// ACL recorded on an item -- the normal state of any locally built copy,
+/// whose cdhash differs from the one the item was written under -- they do not
+/// return until the user answers a Keychain prompt. Run on the main actor that
+/// stalls every main-queue hop in the app, including the ones that prompt's own
+/// window needs, so the app appears frozen rather than merely waiting.
+@globalActor
+actor SpotifyKeychainActor {
+    static let shared = SpotifyKeychainActor()
+
+    /// Runs a synchronous Keychain call on this actor's executor.
+    static func run<T: Sendable>(_ body: @Sendable @escaping () -> T) async -> T {
+        await shared.perform(body)
+    }
+
+    private func perform<T: Sendable>(_ body: @Sendable () -> T) -> T {
+        body()
+    }
+}
+
 protocol SpotifyTokenStoring: Sendable {
-    func read(_ account: SpotifyTokenAccount) -> String?
+    func read(_ account: SpotifyTokenAccount) async -> String?
     /// Returns the Keychain status; `errSecSuccess` means the value is stored.
     /// Callers that then discard the source (e.g. the Defaults migration) must
     /// check this before dropping the only remaining copy of the token.
-    @discardableResult func write(_ value: String, account: SpotifyTokenAccount) -> OSStatus
-    @discardableResult func delete(_ account: SpotifyTokenAccount) -> OSStatus
+    @discardableResult func write(_ value: String, account: SpotifyTokenAccount) async -> OSStatus
+    @discardableResult func delete(_ account: SpotifyTokenAccount) async -> OSStatus
 }
 
 /// Keychain-backed storage for the OAuth token pair. The client ID and token
 /// expiration are not secrets and stay in Defaults.
+///
+/// Every entry point hops onto `SpotifyKeychainActor` before touching the
+/// Keychain; nothing here may be called synchronously from the main actor.
 struct KeychainSpotifyTokenStore: SpotifyTokenStoring {
     private static let service = "com.Ebullioscopic.Atoll.SpotifyLibrary"
 
-    private func baseQuery(for account: SpotifyTokenAccount) -> [String: Any] {
+    private static func baseQuery(for account: SpotifyTokenAccount) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
+            kSecAttrService as String: service,
             kSecAttrAccount as String: account.rawValue
         ]
     }
 
-    func read(_ account: SpotifyTokenAccount) -> String? {
+    func read(_ account: SpotifyTokenAccount) async -> String? {
+        await SpotifyKeychainActor.run { Self.readSync(account) }
+    }
+
+    @discardableResult
+    func write(_ value: String, account: SpotifyTokenAccount) async -> OSStatus {
+        await SpotifyKeychainActor.run { Self.writeSync(value, account: account) }
+    }
+
+    @discardableResult
+    func delete(_ account: SpotifyTokenAccount) async -> OSStatus {
+        await SpotifyKeychainActor.run { Self.deleteSync(account) }
+    }
+
+    // MARK: - Keychain
+
+    private static func readSync(_ account: SpotifyTokenAccount) -> String? {
         var query = baseQuery(for: account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -58,8 +100,7 @@ struct KeychainSpotifyTokenStore: SpotifyTokenStoring {
         return String(data: data, encoding: .utf8)
     }
 
-    @discardableResult
-    func write(_ value: String, account: SpotifyTokenAccount) -> OSStatus {
+    private static func writeSync(_ value: String, account: SpotifyTokenAccount) -> OSStatus {
         let data = Data(value.utf8)
         let update = [kSecValueData as String: data]
         let status = SecItemUpdate(baseQuery(for: account) as CFDictionary, update as CFDictionary)
@@ -72,8 +113,7 @@ struct KeychainSpotifyTokenStore: SpotifyTokenStoring {
         return SecItemAdd(attributes as CFDictionary, nil)
     }
 
-    @discardableResult
-    func delete(_ account: SpotifyTokenAccount) -> OSStatus {
+    private static func deleteSync(_ account: SpotifyTokenAccount) -> OSStatus {
         let status = SecItemDelete(baseQuery(for: account) as CFDictionary)
         // Nothing stored is a successful end state for a delete.
         return status == errSecItemNotFound ? errSecSuccess : status

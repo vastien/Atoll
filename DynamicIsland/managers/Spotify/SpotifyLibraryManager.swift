@@ -59,23 +59,29 @@ final class SpotifyLibraryManager: ObservableObject {
         )
         self.api = SpotifyLibraryAPI(tokenProvider: oauth, httpClient: httpClient)
 
-        migrateLegacyTokensIfNeeded()
         oauth.onTokenStateChange = { [weak self] in self?.refreshAuthenticationState() }
-        refreshAuthenticationState()
+
+        // Both of these reach the Keychain, so neither can run inline here:
+        // `shared` is created lazily by whoever asks for it first, and that
+        // caller is usually on the main actor.
+        Task { [weak self] in
+            await self?.migrateLegacyTokensIfNeeded()
+            self?.refreshAuthenticationState()
+        }
     }
 
     /// Tokens were briefly stored in Defaults; move them into the Keychain once.
     /// The Defaults copy is only cleared once the Keychain write is confirmed,
     /// so a failed write can never lose the token.
-    private func migrateLegacyTokensIfNeeded() {
+    private func migrateLegacyTokensIfNeeded() async {
         let legacyAccessToken = Defaults[.spotifyLibraryAccessToken]
         if !legacyAccessToken.isEmpty,
-           tokenStore.write(legacyAccessToken, account: .accessToken) == errSecSuccess {
+           await tokenStore.write(legacyAccessToken, account: .accessToken) == errSecSuccess {
             Defaults[.spotifyLibraryAccessToken] = ""
         }
         let legacyRefreshToken = Defaults[.spotifyLibraryRefreshToken]
         if !legacyRefreshToken.isEmpty,
-           tokenStore.write(legacyRefreshToken, account: .refreshToken) == errSecSuccess {
+           await tokenStore.write(legacyRefreshToken, account: .refreshToken) == errSecSuccess {
             Defaults[.spotifyLibraryRefreshToken] = ""
         }
     }
@@ -119,7 +125,9 @@ final class SpotifyLibraryManager: ObservableObject {
         Defaults[.spotifyLibraryAccessToken] = ""
         Defaults[.spotifyLibraryRefreshToken] = ""
         error = nil
-        refreshAuthenticationState()
+        // `clearTokens` deletes off the main actor, so the refresh below could
+        // still read the old token. Publish the disconnected state directly.
+        isAuthenticated = false
     }
 
     // MARK: - Saved Tracks
@@ -135,8 +143,14 @@ final class SpotifyLibraryManager: ObservableObject {
 
     // MARK: - State
 
+    /// Republishes `isAuthenticated` from the Keychain. The read happens off
+    /// the main actor, so the value lands a beat later than the call.
     private func refreshAuthenticationState() {
-        let hasRefreshToken = !(tokenStore.read(.refreshToken) ?? "").isEmpty
-        isAuthenticated = hasRefreshToken && !configuredClientID.isEmpty
+        let store = tokenStore
+        let hasClientID = !configuredClientID.isEmpty
+        Task { [weak self] in
+            let hasRefreshToken = !(await store.read(.refreshToken) ?? "").isEmpty
+            self?.isAuthenticated = hasRefreshToken && hasClientID
+        }
     }
 }

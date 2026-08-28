@@ -110,17 +110,22 @@ final class SpotifyOAuthService: SpotifyTokenProviding {
         )
     }
 
+    /// Clears the expiration synchronously so callers see the disconnected
+    /// state immediately; the Keychain deletes trail behind on their own actor.
     func clearTokens() {
-        tokenStore.delete(.accessToken)
-        tokenStore.delete(.refreshToken)
         Defaults[.spotifyLibraryTokenExpiration] = 0
+        let store = tokenStore
+        Task.detached(priority: .utility) {
+            await store.delete(.accessToken)
+            await store.delete(.refreshToken)
+        }
     }
 
     // MARK: - Tokens
 
     func validAccessToken(forceRefresh: Bool = false) async -> String? {
         if !forceRefresh,
-           let cachedToken = tokenStore.read(.accessToken),
+           let cachedToken = await tokenStore.read(.accessToken),
            !cachedToken.isEmpty,
            Defaults[.spotifyLibraryTokenExpiration] > Date().timeIntervalSince1970 + Self.expiryLeeway {
             return cachedToken
@@ -130,7 +135,7 @@ final class SpotifyOAuthService: SpotifyTokenProviding {
             return await refreshTask.value
         }
 
-        guard let refreshToken = tokenStore.read(.refreshToken),
+        guard let refreshToken = await tokenStore.read(.refreshToken),
               !refreshToken.isEmpty
         else { return nil }
         let clientID = configuredClientID
@@ -147,7 +152,7 @@ final class SpotifyOAuthService: SpotifyTokenProviding {
                     ],
                     grant: .refresh
                 )
-                return self.tokenStore.read(.accessToken)
+                return await self.tokenStore.read(.accessToken)
             } catch {
                 return nil
             }
@@ -204,9 +209,9 @@ final class SpotifyOAuthService: SpotifyTokenProviding {
         }
 
         let token = try JSONDecoder().decode(TokenResponse.self, from: data)
-        tokenStore.write(token.accessToken, account: .accessToken)
+        await tokenStore.write(token.accessToken, account: .accessToken)
         if let refreshToken = token.refreshToken, !refreshToken.isEmpty {
-            tokenStore.write(refreshToken, account: .refreshToken)
+            await tokenStore.write(refreshToken, account: .refreshToken)
         }
         Defaults[.spotifyLibraryTokenExpiration] = Date().timeIntervalSince1970 + token.expiresIn
         onTokenStateChange?()
