@@ -72,22 +72,56 @@ struct ClaudeQuotaClient {
         case otherFailure // network/decoding/5xx: reloading credentials would not help.
     }
 
-    func fetchLimits() async -> (session: UsageLimit?, week: UsageLimit?) {
-        guard let creds = await currentCredentials() else { return (nil, nil) }
+    /// Why no quota came back, for the card to explain itself.
+    enum Unavailable: Equatable {
+        case noCredentials
+        case cannotRefresh
+        case requestFailed
+
+        var note: String {
+            switch self {
+            case .noCredentials:
+                return String(localized: "Sign in to Claude Code to show quota")
+            case .cannotRefresh:
+                return String(localized: "Claude Code sign-in has expired -- sign in again to show quota")
+            case .requestFailed:
+                return String(localized: "Could not reach Anthropic for quota")
+            }
+        }
+    }
+
+    func limits() async -> (limits: (session: UsageLimit?, week: UsageLimit?), unavailable: Unavailable?) {
+        guard let creds = await currentCredentials() else { return ((nil, nil), .noCredentials) }
+
+        // A credential with no refresh token cannot be renewed, and its access
+        // token is usually long expired by the time anyone looks. Attempting it
+        // anyway costs a doomed refresh POST plus a retry on every poll and
+        // reports the same "unavailable" either way, so it is checked up front.
+        if Self.isUnrefreshable(creds) { return ((nil, nil), .cannotRefresh) }
+
         switch await attemptFetch(creds) {
         case .success(let limits):
-            return limits
+            return (limits, nil)
         case .authFailure:
             // Claude Code likely rotated the OAuth token out from under our cache
             // (revoked access token, or a refresh token it already consumed). Drop the
             // cached copy, re-read from source (file → Keychain, which CC has updated),
             // and retry exactly once. No retry on non-auth failures.
-            guard let fresh = await reloadCredentials() else { return (nil, nil) }
-            if case .success(let limits) = await attemptFetch(fresh) { return limits }
-            return (nil, nil)
+            if let fresh = await reloadCredentials(), !Self.isUnrefreshable(fresh),
+               case .success(let limits) = await attemptFetch(fresh) {
+                return (limits, nil)
+            }
+            return ((nil, nil), .cannotRefresh)
         case .otherFailure:
-            return (nil, nil)
+            return ((nil, nil), .requestFailed)
         }
+    }
+
+    /// Expired with no way to renew it.
+    private static func isUnrefreshable(_ creds: CredentialFile.OAuth) -> Bool {
+        guard creds.refreshToken.isEmpty else { return false }
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        return creds.expiresAt - nowMs <= refreshSkewMs
     }
 
     private func attemptFetch(_ creds: CredentialFile.OAuth) async -> FetchOutcome {
@@ -155,7 +189,8 @@ struct ClaudeQuotaClient {
             "scope": Self.refreshScope
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        guard let (data, response) = try? await session.data(for: request),
+        guard !creds.refreshToken.isEmpty,
+              let (data, response) = try? await session.data(for: request),
               let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             // Refresh failed. Report the token as invalid (nil) so the caller classifies
             // this as an auth failure and reloads credentials from source, instead of

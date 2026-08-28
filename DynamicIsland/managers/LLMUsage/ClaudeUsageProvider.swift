@@ -17,9 +17,10 @@ struct ClaudeUsageProvider: UsageProvider {
         let files = jsonlFiles(under: root)
         guard !files.isEmpty else { throw UsageError.notFound("No Claude usage logs found") }
         var snapshot = JSONLUsageParser.aggregate(files: files, now: now)
-        let quota = await quotaClient.fetchLimits()
-        snapshot.sessionLimit = quota.session
-        snapshot.weekLimit = quota.week
+        let quota = await quotaClient.limits()
+        snapshot.sessionLimit = quota.limits.session
+        snapshot.weekLimit = quota.limits.week
+        snapshot.quotaNote = quota.unavailable?.note
         snapshot.plan = Self.readPlanLabel()
         return snapshot
     }

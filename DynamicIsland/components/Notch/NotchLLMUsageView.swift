@@ -101,7 +101,10 @@ struct NotchLLMUsageView: View {
                     window("Week", snap.week)
                     window("Session", snap.session)
                 }
-                Text("quota unavailable").font(.caption2).foregroundStyle(.secondary.opacity(0.7))
+                Text(snap.quotaNote ?? String(localized: "quota unavailable"))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary.opacity(0.7))
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 if provider == .cursor {
                     if let limit = snap.sessionLimit { quotaGauge("Cursor Models", limit) }

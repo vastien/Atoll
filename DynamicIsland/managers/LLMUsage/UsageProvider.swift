@@ -55,6 +55,11 @@ struct UsageSnapshot: Equatable {
     var weekLimit: UsageLimit? = nil // 7d window quota
     var models: [ModelUsage] = []
     var plan: String? = nil // Subscription plan label (e.g. "Max 5x"); provided by Claude only, nil otherwise.
+    /// Why there is no quota to show, when token counts were still readable.
+    /// Token totals come from the on-disk transcripts and the quota from the
+    /// provider's API, so one can succeed while the other does not -- and
+    /// "unavailable" on its own gives nobody anything to act on.
+    var quotaNote: String? = nil
     var newAPIAccounts: [NewAPIAccountSnapshot] = []
     var lastUpdated: Date = .distantPast
 }
