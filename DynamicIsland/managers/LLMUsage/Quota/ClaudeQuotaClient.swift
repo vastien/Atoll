@@ -19,7 +19,16 @@ actor ClaudeCredentialStore {
 
 struct ClaudeQuotaClient {
     let session: URLSession
-    init(session: URLSession = URLSession(configuration: .ephemeral)) { self.session = session }
+    /// Consulted when the OAuth path cannot answer -- see `limits()`.
+    let desktopReader: ClaudeDesktopQuotaReader
+
+    init(
+        session: URLSession = URLSession(configuration: .ephemeral),
+        desktopReader: ClaudeDesktopQuotaReader = ClaudeDesktopQuotaReader()
+    ) {
+        self.session = session
+        self.desktopReader = desktopReader
+    }
 
     private static let clientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
     private static let refreshScope = "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
@@ -81,9 +90,9 @@ struct ClaudeQuotaClient {
         var note: String {
             switch self {
             case .noCredentials:
-                return String(localized: "Sign in to Claude Code to show quota")
+                return String(localized: "Sign in to Claude to show quota")
             case .cannotRefresh:
-                return String(localized: "Claude Code sign-in has expired -- sign in again to show quota")
+                return String(localized: "Claude sign-in has expired -- sign in again to show quota")
             case .requestFailed:
                 return String(localized: "Could not reach Anthropic for quota")
             }
@@ -91,17 +100,35 @@ struct ClaudeQuotaClient {
     }
 
     func limits() async -> (limits: (session: UsageLimit?, week: UsageLimit?), unavailable: Unavailable?) {
-        guard let creds = await currentCredentials() else { return ((nil, nil), .noCredentials) }
+        switch await oauthLimits() {
+        case .success(let limits):
+            return (limits, nil)
+        case .unavailable(let reason):
+            // The desktop app writes the same two figures to disk, so someone
+            // who never signed in to the terminal client -- or whose stored
+            // credential has gone stale -- still gets a real answer.
+            if let local = desktopReader.limits() { return (local, nil) }
+            return ((nil, nil), reason)
+        }
+    }
+
+    private enum LimitsOutcome {
+        case success((session: UsageLimit?, week: UsageLimit?))
+        case unavailable(Unavailable)
+    }
+
+    private func oauthLimits() async -> LimitsOutcome {
+        guard let creds = await currentCredentials() else { return .unavailable(.noCredentials) }
 
         // A credential with no refresh token cannot be renewed, and its access
         // token is usually long expired by the time anyone looks. Attempting it
         // anyway costs a doomed refresh POST plus a retry on every poll and
         // reports the same "unavailable" either way, so it is checked up front.
-        if Self.isUnrefreshable(creds) { return ((nil, nil), .cannotRefresh) }
+        if Self.isUnrefreshable(creds) { return .unavailable(.cannotRefresh) }
 
         switch await attemptFetch(creds) {
         case .success(let limits):
-            return (limits, nil)
+            return .success(limits)
         case .authFailure:
             // Claude Code likely rotated the OAuth token out from under our cache
             // (revoked access token, or a refresh token it already consumed). Drop the
@@ -109,11 +136,11 @@ struct ClaudeQuotaClient {
             // and retry exactly once. No retry on non-auth failures.
             if let fresh = await reloadCredentials(), !Self.isUnrefreshable(fresh),
                case .success(let limits) = await attemptFetch(fresh) {
-                return (limits, nil)
+                return .success(limits)
             }
-            return ((nil, nil), .cannotRefresh)
+            return .unavailable(.cannotRefresh)
         case .otherFailure:
-            return ((nil, nil), .requestFailed)
+            return .unavailable(.requestFailed)
         }
     }
 
