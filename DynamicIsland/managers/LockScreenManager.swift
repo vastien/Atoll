@@ -94,9 +94,31 @@ class LockScreenManager: ObservableObject {
     nonisolated private static func setLockedSnapshot(_ locked: Bool) {
         lockedSnapshot.withLock { $0 = locked }
     }
+    /// True while the screen saver is drawing over the display.
+    ///
+    /// Every lock-screen surface is an `NSWindow` at `CGShieldingWindowLevel()`,
+    /// which is above the screen saver's own level, so without this the widgets
+    /// float on top of the saver instead of being covered by it.
+    @Published private(set) var isScreenSaverActive: Bool = false
+
     @Published var isLockIdle: Bool = true
     @Published var shouldDelayPostUnlockMusicHUD: Bool = false
     @Published var lastUpdated: Date = .distantPast
+
+    /// Whether lock-screen widgets belong on screen right now: the Mac is
+    /// locked *and* the screen saver is not covering it.
+    var shouldPresentLockScreenWidgets: Bool {
+        isLocked && !isScreenSaverActive
+    }
+
+    /// `shouldPresentLockScreenWidgets` as a publisher, for the widget managers
+    /// that used to subscribe to `$isLocked` directly.
+    var lockScreenWidgetPresentationPublisher: AnyPublisher<Bool, Never> {
+        Publishers.CombineLatest($isLocked, $isScreenSaverActive)
+            .map { locked, screenSaver in locked && !screenSaver }
+            .removeDuplicates()
+            .eraseToAnyPublisher()
+    }
     @Published private(set) var isFingerprintAnimating: Bool = false
     @Published private(set) var fingerprintAnimationGeneration: Int = 0
     
@@ -163,6 +185,27 @@ class LockScreenManager: ObservableObject {
             name: NSWorkspace.sessionDidBecomeActiveNotification,
             object: nil
         )
+
+        // The screen saver can start either side of the lock: on an idle Mac it
+        // usually starts first and the lock follows, but it also starts while
+        // the Mac is already sitting locked.
+        for name in ["com.apple.screensaver.didstart", "com.apple.screensaver.didlaunch"] {
+            DistributedNotificationCenter.default().addObserver(
+                self,
+                selector: #selector(screenSaverDidStart),
+                name: .init(name),
+                object: nil
+            )
+        }
+
+        for name in ["com.apple.screensaver.willstop", "com.apple.screensaver.didstop"] {
+            DistributedNotificationCenter.default().addObserver(
+                self,
+                selector: #selector(screenSaverDidStop),
+                name: .init(name),
+                object: nil
+            )
+        }
 
         // Power/Touch ID presses arrive as system-defined power-key events on
         // Macs that expose them outside Secure Input. Listen locally and
@@ -256,22 +299,20 @@ class LockScreenManager: ObservableObject {
             coordinator.toggleSneakPeek(status: false, type: coordinator.sneakPeek.type)
         }
         
-        // Show panel FIRST (creates and shows window on lock screen)
-        print("[\(timestamp())] LockScreenManager: 🎵 Showing lock screen panel")
-        LockScreenPanelManager.shared.showPanel()
         updateNativeHUDSuppression()
-        LockScreenLiveActivityWindowManager.shared.showLocked()
-        LockScreenWeatherManager.shared.showWeatherWidget()
-        LockScreenTimerWidgetManager.shared.handleLockStateChange(isLocked: true)
-        
-        // THEN trigger lock icon in Atoll (only if enabled in settings)
-        if Defaults[.enableLockScreenLiveActivity] {
-            print("[\(timestamp())] LockScreenManager: 🔴 Starting lock icon live activity")
-            coordinator.toggleExpandingView(status: true, type: .lockScreen)
+
+        // Read the screen saver directly rather than trusting that its start
+        // notification has already been delivered: on an idle Mac the saver
+        // starts first and the lock follows, so this is the ordering that
+        // decides whether the widgets are about to land on top of it.
+        isScreenSaverActive = Self.isScreenSaverRunning()
+
+        if isScreenSaverActive {
+            print("[\(timestamp())] LockScreenManager: 💤 Screen saver is up -- holding lock screen widgets")
         } else {
-            print("[\(timestamp())] LockScreenManager: ⏭️ Lock icon disabled in settings")
+            presentLockScreenSurfaces()
         }
-        
+
         startLockStatePolling()
 
         print("[\(timestamp())] LockScreenManager: ✅ Lock screen activated")
@@ -293,6 +334,9 @@ class LockScreenManager: ObservableObject {
             startFingerprintAnimation(resetIfStillLocked: false)
         }
         isLocked = false
+        // Unlocking takes user input, which always dismisses the screen saver.
+        // Clearing this here also recovers from a dropped stop notification.
+        isScreenSaverActive = false
         updateNativeHUDSuppression()
         stopLockStatePolling()
         postUnlockMusicHUDTask?.cancel()
@@ -347,6 +391,99 @@ class LockScreenManager: ObservableObject {
         print("[\(self.timestamp())] LockScreenManager: ✅ Lock screen deactivated")
     }
     
+    // MARK: - Lock Screen Surfaces
+
+    /// Puts every lock-screen surface on screen. Runs when the Mac locks, and
+    /// again when the screen saver ends while the Mac is still locked.
+    private func presentLockScreenSurfaces() {
+        print("[\(timestamp())] LockScreenManager: 🎵 Showing lock screen panel")
+        LockScreenPanelManager.shared.showPanel()
+        LockScreenLiveActivityWindowManager.shared.showLocked()
+        LockScreenWeatherManager.shared.showWeatherWidget()
+        LockScreenTimerWidgetManager.shared.handleLockStateChange(isLocked: true)
+
+        if Defaults[.enableLockScreenLiveActivity] {
+            print("[\(timestamp())] LockScreenManager: 🔴 Starting lock icon live activity")
+            coordinator.toggleExpandingView(status: true, type: .lockScreen)
+        } else {
+            print("[\(timestamp())] LockScreenManager: ⏭️ Lock icon disabled in settings")
+        }
+    }
+
+    /// Takes every lock-screen surface back down with none of the unlock
+    /// choreography -- no chime, no unlock animation, no idle-state change.
+    /// The Mac is still locked; the screen saver is simply in front of us.
+    private func dismissLockScreenSurfaces() {
+        print("[\(timestamp())] LockScreenManager: 💤 Hiding lock screen widgets behind the screen saver")
+        LockScreenPanelManager.shared.hidePanel()
+        FullScreenArtworkWindowManager.shared.hide()
+        LockScreenLiveActivityWindowManager.shared.hideImmediately()
+        LockScreenWeatherManager.shared.hideWeatherWidget()
+        LockScreenTimerWidgetManager.shared.handleLockStateChange(isLocked: false)
+
+        if Defaults[.enableLockScreenLiveActivity] {
+            coordinator.toggleExpandingView(status: false, type: .lockScreen)
+        }
+    }
+
+    // MARK: - Screen Saver
+
+    /// Bundle identifiers and executable names of the processes that host the
+    /// screen saver. `ScreenSaverEngine` covers the system savers; third-party
+    /// `.saver` bundles are hosted out of process by `legacyScreenSaver`.
+    ///
+    /// Matched on the process rather than on window levels: the lock screen is
+    /// already crowded with high-level windows owned by `loginwindow` and
+    /// `SecurityAgent`, and mistaking one of those for the saver would keep the
+    /// widgets hidden for the whole lock.
+    private static let screenSaverProcessNames: Set<String> = [
+        "ScreenSaverEngine",
+        "legacyScreenSaver"
+    ]
+
+    private static let screenSaverBundleIdentifiers: Set<String> = [
+        "com.apple.ScreenSaver.Engine",
+        "com.apple.ScreenSaver.Engine.legacyScreenSaver"
+    ]
+
+    /// Ground truth for "is the screen saver up", independent of whether its
+    /// notifications were delivered.
+    private static func isScreenSaverRunning() -> Bool {
+        NSWorkspace.shared.runningApplications.contains { app in
+            if let bundleID = app.bundleIdentifier,
+               screenSaverBundleIdentifiers.contains(bundleID) {
+                return true
+            }
+            if let executable = app.executableURL?.lastPathComponent,
+               screenSaverProcessNames.contains(executable) {
+                return true
+            }
+            return false
+        }
+    }
+
+    @objc private func screenSaverDidStart() {
+        setScreenSaverActive(true)
+    }
+
+    @objc private func screenSaverDidStop() {
+        setScreenSaverActive(false)
+    }
+
+    private func setScreenSaverActive(_ active: Bool) {
+        guard isScreenSaverActive != active else { return }
+        isScreenSaverActive = active
+        print("[\(timestamp())] LockScreenManager: 💤 Screen saver \(active ? "started" : "stopped")")
+
+        // Only the locked case has anything on screen to take down or put back.
+        guard isLocked else { return }
+        if active {
+            dismissLockScreenSurfaces()
+        } else {
+            presentLockScreenSurfaces()
+        }
+    }
+
     // MARK: - Lock State Polling
 
     // Defensive fallback against late/missed `com.apple.screenIsUnlocked` and
@@ -372,9 +509,16 @@ class LockScreenManager: ObservableObject {
     private func startLockStatePolling() {
         lockStatePollTask?.cancel()
         lockStatePollTask = Task { [weak self] in
+            var tick = 0
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(500))
                 if Task.isCancelled { return }
+                tick &+= 1
+                // Enumerating running applications is far more expensive than
+                // reading the session dictionary, so the screen saver only gets
+                // reconciled every fourth tick. The notifications carry the
+                // fast path; this is just the safety net.
+                let reconcileScreenSaver = tick % 4 == 0
                 await MainActor.run {
                     guard let self, self.isLocked else { return }
                     if !Self.isSessionScreenLocked() {
@@ -383,7 +527,16 @@ class LockScreenManager: ObservableObject {
                         return
                     }
 
-                    // Still locked: make sure the media panel is actually there.
+                    // Recover from a screen saver start or stop notification
+                    // that never arrived. `setScreenSaverActive` is a no-op
+                    // when it already agrees with what we believe.
+                    if reconcileScreenSaver {
+                        self.setScreenSaverActive(Self.isScreenSaverRunning())
+                    }
+
+                    // Still locked and in front: make sure the media panel is
+                    // actually there.
+                    guard self.shouldPresentLockScreenWidgets else { return }
                     LockScreenPanelManager.shared.ensurePresentedWhileLocked()
                 }
             }

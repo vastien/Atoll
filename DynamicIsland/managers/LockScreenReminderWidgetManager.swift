@@ -36,11 +36,13 @@ final class LockScreenReminderWidgetManager: ObservableObject {
     }
 
     private func observeLockState() {
-        LockScreenManager.shared.$isLocked
-            .removeDuplicates()
+        // Presentation rather than the raw lock state: the screen saver draws
+        // below our shielding-level window, so the widget has to come down
+        // while it is up even though the Mac stays locked.
+        LockScreenManager.shared.lockScreenWidgetPresentationPublisher
             .receive(on: RunLoop.main)
-            .sink { [weak self] locked in
-                self?.handleLockStateChange(isLocked: locked)
+            .sink { [weak self] shouldPresent in
+                self?.handleLockStateChange(isLocked: shouldPresent)
             }
             .store(in: &cancellables)
     }
@@ -78,7 +80,7 @@ final class LockScreenReminderWidgetManager: ObservableObject {
             .sink { [weak self] change in
                 guard let self else { return }
                 if change.newValue {
-                    if LockScreenManager.shared.currentLockStatus {
+                    if LockScreenManager.shared.shouldPresentLockScreenWidgets {
                         self.handleSnapshotUpdate(self.reminderManager.lockScreenSnapshot)
                     }
                 } else {
@@ -117,7 +119,7 @@ final class LockScreenReminderWidgetManager: ObservableObject {
 
         snapshot = newSnapshot
 
-        guard LockScreenManager.shared.currentLockStatus else { return }
+        guard LockScreenManager.shared.shouldPresentLockScreenWidgets else { return }
 
         if let newSnapshot {
             Logger.log("LockScreenReminderWidgetManager: Updating snapshot on lock screen", category: .ui)

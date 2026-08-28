@@ -29,7 +29,7 @@ final class ExtensionLockScreenWidgetPresentationController {
     private var cancellables: Set<AnyCancellable> = []
     private let windowPool = ExtensionLockScreenWidgetWindowPool()
     private var cachedPayloads: [ExtensionLockScreenWidgetPayload] = []
-    private var isLocked: Bool = false
+    private var shouldPresent: Bool = false
     private var lastVisibilityState: VisibilityState?
 
     init(manager: ExtensionLockScreenWidgetManager) {
@@ -43,12 +43,14 @@ final class ExtensionLockScreenWidgetPresentationController {
     }
 
     private func observeLockState() {
-        LockScreenManager.shared.$isLocked
-            .removeDuplicates()
+        // Presentation rather than the raw lock state: the screen saver draws
+        // below our shielding-level windows, so these have to come down while
+        // it is up even though the Mac stays locked.
+        LockScreenManager.shared.lockScreenWidgetPresentationPublisher
             .receive(on: RunLoop.main)
-            .sink { [weak self] locked in
+            .sink { [weak self] shouldPresent in
                 guard let self else { return }
-                self.isLocked = locked
+                self.shouldPresent = shouldPresent
                 self.refreshPresentation()
             }
             .store(in: &cancellables)
@@ -81,7 +83,7 @@ final class ExtensionLockScreenWidgetPresentationController {
     }
 
     private func refreshPresentation() {
-        guard isLocked, LockScreenManager.shared.currentLockStatus, Defaults[.enableExtensionLockScreenWidgets] else {
+        guard shouldPresent, LockScreenManager.shared.shouldPresentLockScreenWidgets, Defaults[.enableExtensionLockScreenWidgets] else {
             windowPool.hideAll()
             updateVisibilityLog(.hidden(reason: "lock-state"))
             return
