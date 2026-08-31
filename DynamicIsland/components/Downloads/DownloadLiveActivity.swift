@@ -45,18 +45,20 @@ struct DownloadLiveActivity: View {
     /// notch and nothing else, so any width given to it has to come out of one
     /// side or the other -- which is what used to strand the icon almost a
     /// hundred points from the notch with dead black in between.
-    private static let speedAllowance: CGFloat = 58
+    private static let speedAllowance: CGFloat = 44
 
     /// Wing width. Both sides get the same one so the panel stays symmetrical
     /// about the cutout, which is a hole in the display and cannot be drawn
     /// off-centre.
     private var wingWidth: CGFloat {
-        max(60, vm.effectiveClosedNotchHeight) + speedAllowance
+        // The wider side decides, because the panel has to stay symmetrical
+        // about the cutout. That leaves the icon side with slack it cannot
+        // fill, so the content is centred in each wing rather than pinned to
+        // the notch -- pinned, all of that slack pooled against the outer edge
+        // and read as a gap.
+        max(48, vm.effectiveClosedNotchHeight) + speedAllowance
     }
 
-    /// Keeps the icon and the rate off the notch edge, matching the gap the
-    /// music activity leaves.
-    private static let notchGap: CGFloat = 10
 
     private var speedAllowance: CGFloat { speedText == nil ? 0 : Self.speedAllowance }
 
@@ -92,8 +94,7 @@ struct DownloadLiveActivity: View {
                                 height: vm.effectiveClosedNotchHeight - 12
                             )
                         }
-                        .padding(.trailing, Self.notchGap)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                     }
                 }
                 .frame(
@@ -135,14 +136,13 @@ struct DownloadLiveActivity: View {
                                         ProgressView()
                                             .progressViewStyle(.linear)
                                             .tint(.accentColor)
-                                            .frame(width: 40)
+                                            .frame(width: 32)
                                     }
                                 }
                                 .animation(.smooth(duration: 0.2), value: speedText)
                             }
                         }
-                        .padding(.leading, Self.notchGap)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                     }
                 }
                 .frame(
