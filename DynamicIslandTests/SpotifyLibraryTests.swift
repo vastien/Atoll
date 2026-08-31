@@ -238,33 +238,39 @@ final class SpotifyLibraryTests: XCTestCase {
 
     // MARK: - Legacy migration (item 2: no data loss on a failed Keychain write)
 
-    func testMigrationKeepsDefaultsWhenKeychainWriteFails() {
+    func testMigrationKeepsDefaultsWhenKeychainWriteFails() async {
         Defaults[.spotifyLibraryAccessToken] = "legacy-access"
         Defaults[.spotifyLibraryRefreshToken] = "legacy-refresh"
         let store = FakeTokenStore()
         store.writeFailure = errSecIO  // simulate the Keychain rejecting the write
 
-        _ = SpotifyLibraryManager(
+        let manager = SpotifyLibraryManager(
             tokenStore: store,
             httpClient: FakeHTTPClient(),
             authSession: NoopAuthSession()
         )
+        // Waited on deliberately: without it this passes because the migration
+        // has not run yet, which is not what it claims to be testing.
+        await manager.waitForStartup()
 
         XCTAssertEqual(Defaults[.spotifyLibraryAccessToken], "legacy-access",
                        "A failed Keychain write must not drop the only copy of the token")
         XCTAssertEqual(Defaults[.spotifyLibraryRefreshToken], "legacy-refresh")
     }
 
-    func testMigrationClearsDefaultsOnSuccessfulWrite() {
+    func testMigrationClearsDefaultsOnSuccessfulWrite() async {
         Defaults[.spotifyLibraryAccessToken] = "legacy-access"
         Defaults[.spotifyLibraryRefreshToken] = "legacy-refresh"
         let store = FakeTokenStore()
 
-        _ = SpotifyLibraryManager(
+        let manager = SpotifyLibraryManager(
             tokenStore: store,
             httpClient: FakeHTTPClient(),
             authSession: NoopAuthSession()
         )
+        // The migration reaches the Keychain, so `init` starts it rather than
+        // running it inline; asserting without waiting would race it.
+        await manager.waitForStartup()
 
         XCTAssertEqual(store.storage[.accessToken], "legacy-access")
         XCTAssertEqual(store.storage[.refreshToken], "legacy-refresh")

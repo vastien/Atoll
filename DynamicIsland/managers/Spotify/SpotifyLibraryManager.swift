@@ -64,10 +64,24 @@ final class SpotifyLibraryManager: ObservableObject {
         // Both of these reach the Keychain, so neither can run inline here:
         // `shared` is created lazily by whoever asks for it first, and that
         // caller is usually on the main actor.
-        Task { [weak self] in
+        //
+        // Held rather than discarded so callers can tell when the startup work
+        // has finished. Nothing in the app waits on it -- the state it settles
+        // is published -- but a test that asserts on the result of the
+        // migration has no other way to know it has happened, and asserting
+        // straight after `init` would race it.
+        startupTask = Task { [weak self] in
             await self?.migrateLegacyTokensIfNeeded()
             self?.refreshAuthenticationState()
         }
+    }
+
+    /// The Keychain work started by `init`. See the comment there.
+    private(set) var startupTask: Task<Void, Never>?
+
+    /// Waits for the startup migration and state refresh to finish.
+    func waitForStartup() async {
+        await startupTask?.value
     }
 
     /// Tokens were briefly stored in Defaults; move them into the Keychain once.
