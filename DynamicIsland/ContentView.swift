@@ -990,6 +990,19 @@ struct ContentView: View {
                       let extensionSecondaryPayloadID = extensionSecondaryPayloadID(for: musicSecondary)
                       let extensionStandalonePayload = resolvedExtensionStandalonePayload(excluding: extensionSecondaryPayloadID)
                       let activeSneakPeekStyle = resolvedSneakPeekStyle()
+                      let closedActivities = closedActivityState(
+                          isMusicPairingEligible: musicPairingEligible,
+                          extensionStandalonePayload: extensionStandalonePayload
+                      )
+                      // Only when two non-music activities are up at once: one
+                      // on its own still gets its full standalone view, and a
+                      // music pair already has a richer layout of its own.
+                      let compactPair = vm.notchState == .closed
+                          && !vm.hideOnClosed
+                          && !isCurrentScreenExpansionVisible
+                          && ClosedActivityResolver.usesCompactPairing(in: closedActivities)
+                          ? ClosedActivityResolver.pair(in: closedActivities)
+                          : nil
                       let expansionMatchesSecondary: Bool = {
                           guard let musicSecondary else { return false }
                           switch musicSecondary {
@@ -1046,6 +1059,15 @@ struct ContentView: View {
                           MusicLiveActivity(secondary: musicSecondary)
                               .id("closed-music-live-activity")
                               .transition(closedLiveActivitySwapTransition)
+                      } else if let compactPair, let secondary = compactPair.secondary {
+                          PairedCompactLiveActivity(
+                              leading: compactPair.primary,
+                              trailing: secondary,
+                              isHovering: isHovering,
+                              gestureProgress: gestureProgress
+                          )
+                          .id("closed-paired-live-activity")
+                          .transition(closedLiveActivitySwapTransition)
                       } else if (!isCurrentScreenExpansionVisible || currentScreenExpansionType == .timer) && vm.notchState == .closed && timerManager.isTimerActive && coordinator.timerLiveActivityEnabled && !vm.hideOnClosed {
                           TimerLiveActivity()
                       } else if (!isCurrentScreenExpansionVisible || currentScreenExpansionType == .reminder) && vm.notchState == .closed && reminderManager.isActive && enableReminderLiveActivity && !vm.hideOnClosed {
@@ -1410,6 +1432,35 @@ struct ContentView: View {
         .frame(width: notchWidth, height: notchContentHeight)
         .frame(height: outerHeight, alignment: .center)
         .animation(.smooth(duration: 0.25), value: secondary?.id)
+    }
+
+    /// Snapshots which closed-notch activities are live, so the ordering can be
+    /// decided by `ClosedActivityResolver` rather than by the reading order of
+    /// an `else if` chain.
+    ///
+    /// The conditions are the same ones each standalone branch below already
+    /// tests, minus the expansion and hidden-notch gates -- those decide
+    /// whether the notch shows anything at all, not which activity wins it.
+    private func closedActivityState(
+        isMusicPairingEligible: Bool,
+        extensionStandalonePayload: ExtensionLiveActivityPayload?
+    ) -> ClosedActivityState {
+        ClosedActivityState(
+            music: isMusicPairingEligible,
+            timer: coordinator.timerLiveActivityEnabled && timerManager.isTimerActive,
+            reminder: enableReminderLiveActivity && reminderManager.isActive,
+            recording: enableScreenRecordingDetection && showRecordingIndicator && recordingManager.isRecording,
+            download: Defaults[.enableDownloadListener] && downloadManager.isDownloading,
+            localSend: localSendLiveActivityActive,
+            focus: enableDoNotDisturbDetection
+                && showDoNotDisturbIndicator
+                && doNotDisturbManager.isDoNotDisturbActive
+                && !lockScreenManager.isLocked,
+            privacy: privacyManager.hasAnyIndicator
+                && (Defaults[.enableCameraDetection] || Defaults[.enableMicrophoneDetection]),
+            extensionPayload: extensionStandalonePayload != nil,
+            shelf: !shelfState.isEmpty && !lockScreenManager.isLocked && !enableMinimalisticUI
+        )
     }
 
     private func resolveMusicSecondaryLiveActivity(isMusicPairingEligible: Bool = true) -> MusicSecondaryLiveActivity? {
