@@ -689,6 +689,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         LockScreenLiveActivityWindowManager.shared.configure(viewModel: vm)
         LockScreenManager.shared.configure(viewModel: vm)
+        // No-ops when the App Group container is unavailable, which is what
+        // an unsigned build looks like.
+        WidgetSnapshotPublisher.shared.start()
         extensionXPCServiceHost.start()
         extensionRPCServer.start()
         
