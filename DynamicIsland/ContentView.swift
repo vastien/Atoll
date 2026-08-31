@@ -328,6 +328,12 @@ struct ContentView: View {
         isDynamicIslandMode
     }
 
+    /// Gap between the closed notch's content and the notch cutout itself.
+    ///
+    /// Balances against `notchHorizontalPadding`, which insets that content
+    /// from the panel's outer edge by the closed corner radius.
+    static let notchEdgeInset: CGFloat = 10
+
     private var notchHorizontalPadding: CGFloat {
         guard vm.notchState == .open else {
             return activeCornerRadiusInsets.closed.bottom
@@ -1308,7 +1314,7 @@ struct ContentView: View {
             notchHeight: notchContentHeight
         )
         let effectiveCenterWidth = inlineSneakPeekActive ? 380 : centerBaseWidth
-        let notchWidth = wingBaseWidth + effectiveCenterWidth + rightWingWidth
+        let notchWidth = wingBaseWidth + effectiveCenterWidth + Self.notchEdgeInset * 2 + rightWingWidth
         let badgeBaseSize = max(13, artworkSize * 0.36)
         let badgeDisplaySize = badgeDisplaySize(for: secondary, baseSize: badgeBaseSize)
         let badgeOffset = badgeOverlayOffset(for: secondary, badgeSize: badgeDisplaySize)
@@ -1341,6 +1347,12 @@ struct ContentView: View {
             Rectangle()
                 .fill(.black)
                 .frame(width: effectiveCenterWidth, height: notchContentHeight)
+                // Holds the wings off the notch cutout. Without it the artwork
+                // butts straight against the notch while still sitting a full
+                // corner radius in from the panel's outer edge, so the closed
+                // notch reads as lopsided -- more air outside the artwork than
+                // between it and the notch.
+                .padding(.horizontal, Self.notchEdgeInset)
                 .overlay(
                     HStack(alignment: .top) {
                         if(coordinator.expandingView.show && coordinator.expandingView.type == .music) {
