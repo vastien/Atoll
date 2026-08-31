@@ -41,12 +41,22 @@ struct DownloadLiveActivity: View {
 
     /// How much room the rate needs beside the indicator.
     ///
-    /// It is added to the black centre as well as to the right-hand side. The
-    /// centre only covers the physical notch while the two sides stay balanced
-    /// -- that is what the `isDownloading` widening already compensates for --
-    /// so growing one side alone drags the centre's right edge in under the
-    /// notch and hides whatever sits next to it.
+    /// Added to both wings, never to the centre. The centre is the physical
+    /// notch and nothing else, so any width given to it has to come out of one
+    /// side or the other -- which is what used to strand the icon almost a
+    /// hundred points from the notch with dead black in between.
     private static let speedAllowance: CGFloat = 58
+
+    /// Wing width. Both sides get the same one so the panel stays symmetrical
+    /// about the cutout, which is a hole in the display and cannot be drawn
+    /// off-centre.
+    private var wingWidth: CGFloat {
+        max(60, vm.effectiveClosedNotchHeight) + speedAllowance
+    }
+
+    /// Keeps the icon and the rate off the notch edge, matching the gap the
+    /// music activity leaves.
+    private static let notchGap: CGFloat = 10
 
     private var speedAllowance: CGFloat { speedText == nil ? 0 : Self.speedAllowance }
 
@@ -82,24 +92,20 @@ struct DownloadLiveActivity: View {
                                 height: vm.effectiveClosedNotchHeight - 12
                             )
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                        .padding(.trailing, Self.notchGap)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                     }
                 }
                 .frame(
-                    width: isExpanded ? max(0, vm.effectiveClosedNotchHeight - (isHovering ? 0 : 12) + gestureProgress / 2) : 0,
+                    width: isExpanded ? wingWidth + gestureProgress / 2 : 0,
                     height: vm.effectiveClosedNotchHeight - (isHovering ? 0 : 12)
                 )
+                .animation(.smooth(duration: 0.25), value: speedAllowance)
             
             // Center: closed notch body (slightly wider during downloads)
             Rectangle()
                 .fill(.black)
-                .frame(
-                    width: vm.closedNotchSize.width
-                        + (isHovering ? 8 : 0)
-                        + (downloadManager.isDownloading ? 40 : 0)
-                        + speedAllowance
-                )
-                .animation(.smooth(duration: 0.25), value: speedAllowance)
+                .frame(width: vm.closedNotchSize.width + (isHovering ? 8 : 0))
             
             // Right side: indeterminate-style progress bar
             Color.clear
@@ -110,7 +116,6 @@ struct DownloadLiveActivity: View {
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundStyle(.green)
                                     .font(.system(size: 16, weight: .semibold))
-                                    .padding(.trailing, 6)
                             } else {
                                 HStack(spacing: 6) {
                                     if let speedText {
@@ -133,15 +138,15 @@ struct DownloadLiveActivity: View {
                                             .frame(width: 40)
                                     }
                                 }
-                                .padding(.trailing, 6)
                                 .animation(.smooth(duration: 0.2), value: speedText)
                             }
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                        .padding(.leading, Self.notchGap)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                     }
                 }
                 .frame(
-                    width: isExpanded ? max(60, vm.effectiveClosedNotchHeight) + speedAllowance : 0,
+                    width: isExpanded ? wingWidth : 0,
                     height: vm.effectiveClosedNotchHeight - (isHovering ? 0 : 12)
                 )
                 .animation(.smooth(duration: 0.25), value: speedAllowance)
