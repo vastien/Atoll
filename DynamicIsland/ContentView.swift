@@ -999,7 +999,13 @@ struct ContentView: View {
     private var menuBarClearanceOffset: CGFloat {
         guard vm.notchState == .closed,
               !vm.hideOnClosed,
-              closedContentWidth > 0,
+              // Not merely non-zero: an idle closed notch still measures a
+              // clear rectangle, and `> 0` let a long menu title shift the
+              // idle notch, taking its hit area with it.
+              MenuBarLayout.contentReachesMenus(
+                  contentWidth: closedContentWidth,
+                  notchWidth: vm.closedNotchSize.width
+              ),
               let menusRightEdge = menuBarLayout.appMenusRightEdge,
               let screenFrame = getScreenFrame(currentScreenName)
         else { return 0 }

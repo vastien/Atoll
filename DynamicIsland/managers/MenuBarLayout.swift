@@ -50,6 +50,16 @@ final class MenuBarLayout: ObservableObject {
     /// Zero when nothing is covered. Capped at the room remaining on the right,
     /// because a shift that pushes the content off the far edge has traded one
     /// covered thing for another.
+    /// Whether closed-notch content is wide enough to reach the menu strip.
+    ///
+    /// The closed layout always measures *something*: with no live activity it
+    /// falls through to a clear rectangle narrower than the notch. A non-zero
+    /// width is therefore not evidence that anything can cover a menu, and
+    /// only content spilling past the notch can.
+    nonisolated static func contentReachesMenus(contentWidth: CGFloat, notchWidth: CGFloat) -> Bool {
+        contentWidth > notchWidth
+    }
+
     nonisolated static func clearanceOffset(
         contentWidth: CGFloat,
         screenFrame: CGRect,

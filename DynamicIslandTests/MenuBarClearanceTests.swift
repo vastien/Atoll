@@ -16,6 +16,22 @@ final class MenuBarClearanceTests: XCTestCase {
         )
     }
 
+    // MARK: - Whether the content can cover a menu at all
+
+    func testIdleContentNarrowerThanTheNotchNeverReachesTheMenus() {
+        // With no live activity the closed layout measures a clear rectangle
+        // 20pt narrower than the notch, which sits entirely inside it.
+        XCTAssertFalse(MenuBarLayout.contentReachesMenus(contentWidth: 165, notchWidth: 185))
+    }
+
+    func testContentExactlyTheNotchWidthDoesNotReachTheMenus() {
+        XCTAssertFalse(MenuBarLayout.contentReachesMenus(contentWidth: 185, notchWidth: 185))
+    }
+
+    func testAnActivityWiderThanTheNotchReachesTheMenus() {
+        XCTAssertTrue(MenuBarLayout.contentReachesMenus(contentWidth: 300, notchWidth: 185))
+    }
+
     func testShortMenusLeaveTheNotchCentred() {
         // 300pt of content is centred at 855, so it begins at 705. Menus that
         // end at 606 -- Zen's, measured -- are nowhere near it.
