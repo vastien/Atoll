@@ -22,11 +22,60 @@
 
 import AppKit
 import Combine
+import Defaults
 import Foundation
 
 final class NowPlayingController: ObservableObject, MediaControllerProtocol {
-    // Stub for now to conform with ControllerProtocol
-    func updatePlaybackInfo() async {}
+    /// Re-reads the true playback position from the adapter.
+    ///
+    /// The stream only emits when something *changes*, so a track that is
+    /// simply playing produces no events and the position has to be
+    /// extrapolated from the last anchor a sender published. Senders are not
+    /// obliged to publish often -- Spotify anchors once when a track starts --
+    /// so that estimate drifts, and at launch there is no anchor at all, which
+    /// is why starting Atoll mid-song showed 0:00.
+    ///
+    /// `get --now` answers with the position *as of this instant* rather than
+    /// the sender's own stale anchor, which is exactly the correction needed.
+    func updatePlaybackInfo() async {
+        guard let payload = await Self.readCurrentPayload() else { return }
+        // Merged as a diff: this is a position correction, not a new track, and
+        // anything the reading does not carry should stay as the stream left it.
+        await handleAdapterUpdate(NowPlayingUpdate(payload: payload, diff: true))
+    }
+
+    /// Runs the adapter once and decodes its answer.
+    private static func readCurrentPayload() async -> NowPlayingPayload? {
+        guard
+            let scriptURL = Bundle.main.url(forResource: "mediaremote-adapter", withExtension: "pl"),
+            let frameworkPath = Bundle.main.resourceURL?
+                .appendingPathComponent("MediaRemoteAdapter.framework")
+                .path
+        else { return nil }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+        process.arguments = [scriptURL.path, frameworkPath, "get", "--micros", "--now"]
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+        } catch {
+            print("NowPlayingController: could not run adapter get: \(error)")
+            return nil
+        }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard !data.isEmpty else { return nil }
+
+        // `get` answers with a bare payload, where `stream` wraps one in an
+        // update envelope.
+        return try? JSONDecoder().decode(NowPlayingPayload.self, from: data)
+    }
 
     /// How recent a sender's timestamp has to be for the position beside it to
     /// count as a reading of now rather than a record of something earlier.
@@ -61,6 +110,7 @@ final class NowPlayingController: ObservableObject, MediaControllerProtocol {
     private var process: Process?
     private var pipeHandler: JSONLinesPipeHandler?
     private var streamTask: Task<Void, Never>?
+    private var resyncTask: Task<Void, Never>?
 
     // MARK: - Initialization
     init?() {
@@ -94,6 +144,7 @@ final class NowPlayingController: ObservableObject, MediaControllerProtocol {
 
     deinit {
         streamTask?.cancel()
+        resyncTask?.cancel()
         
         if let pipeHandler = self.pipeHandler {
             Task { await pipeHandler.close()
@@ -301,8 +352,38 @@ final class NowPlayingController: ObservableObject, MediaControllerProtocol {
             streamTask = Task { [weak self] in
                 await self?.processJSONStream()
             }
+            // Seed immediately, whether or not anything is playing: a paused
+            // track mid-song has a real position too, and the stream will not
+            // mention it until something changes.
+            Task { [weak self] in
+                await self?.updatePlaybackInfo()
+                await self?.startPositionResync()
+            }
         } catch {
             assertionFailure("Failed to launch mediaremote-adapter.pl: \(error)")
+        }
+    }
+
+    /// Periodically corrects the extrapolated position against the real one.
+    private func startPositionResync() async {
+        resyncTask?.cancel()
+        resyncTask = Task { [weak self] in
+            while !Task.isCancelled {
+                let seconds = Defaults[.nowPlayingResyncSeconds]
+                // Off. Keep the task alive on a slow idle so switching the
+                // setting back on takes effect without restarting Atoll.
+                guard seconds > 0 else {
+                    try? await Task.sleep(for: .seconds(5))
+                    continue
+                }
+
+                try? await Task.sleep(for: .seconds(seconds))
+                guard !Task.isCancelled else { return }
+                // Nothing drifts while paused -- the estimate is pinned to the
+                // anchor -- so a reading would cost a process and change nothing.
+                guard self?.playbackState.isPlaying == true else { continue }
+                await self?.updatePlaybackInfo()
+            }
         }
     }
 

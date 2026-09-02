@@ -933,6 +933,15 @@ enum LockScreenLiveActivityIconStyle: String, Defaults.Serializable {
 }
 
 extension Defaults.Keys {
+    /// How often to re-read the true playback position from the Now Playing
+    /// adapter, in seconds. `0` turns the resync off.
+    ///
+    /// The adapter streams on change only, so nothing arrives while a track
+    /// simply plays and the position has to be extrapolated from the last
+    /// anchor a sender published. Senders are not obliged to publish often --
+    /// Spotify anchors once when a track starts -- so that estimate drifts.
+    static let nowPlayingResyncSeconds = Key<Double>("nowPlayingResyncSeconds", default: 30)
+
         // MARK: General
     static let updateChannel = Key<UpdateChannel>("updateChannel", default: .stable)
     static let logLevel = Key<LogLevel>("logLevel", default: .none)

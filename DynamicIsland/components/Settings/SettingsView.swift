@@ -779,6 +779,7 @@ struct SettingsView: View {
 
             // Media
             SettingsSearchEntry(tab: .media, title: "Music Source", keywords: ["media source", "controller"], highlightID: SettingsTab.media.highlightID(for: "Music Source")),
+            SettingsSearchEntry(tab: .media, title: "Re-check playback position", keywords: ["position", "elapsed", "drift", "sync", "resync", "poll", "timestamp"], highlightID: SettingsTab.media.highlightID(for: "Re-check playback position")),
             SettingsSearchEntry(tab: .media, title: "Skip buttons", keywords: ["skip", "controls", "±10"], highlightID: SettingsTab.media.highlightID(for: "Skip buttons")),
             SettingsSearchEntry(tab: .media, title: "Sneak Peek Style", keywords: ["sneak peek", "preview"], highlightID: SettingsTab.media.highlightID(for: "Sneak Peek Style")),
             SettingsSearchEntry(tab: .media, title: "Show lyrics", keywords: ["lyrics", "song text", "side panel", "calendar", "inline"], highlightID: SettingsTab.media.highlightID(for: "Show lyrics")),
@@ -3028,6 +3029,7 @@ private extension MediaControllerType {
 }
 
 struct Media: View {
+    @Default(.nowPlayingResyncSeconds) private var nowPlayingResyncSeconds
     @Default(.waitInterval) var waitInterval
     @Default(.mediaController) var mediaController
     @ObservedObject var coordinator = DynamicIslandViewCoordinator.shared
@@ -3126,6 +3128,20 @@ struct Media: View {
 
             if mediaController == .cider {
                 CiderFavoritingSettingsSection()
+            }
+
+            Section {
+                Picker("Re-check playback position", selection: $nowPlayingResyncSeconds) {
+                    Text("Off").tag(0.0)
+                    Text("Every 15 seconds").tag(15.0)
+                    Text("Every 30 seconds").tag(30.0)
+                    Text("Every minute").tag(60.0)
+                }
+                .settingsHighlight(id: highlightID("Re-check playback position"))
+            } header: {
+                Text("Playback Position")
+            } footer: {
+                Text("Atoll is told the position when playback changes and counts forward from there. Apps are not obliged to keep saying where they are -- Spotify says so once per track -- so the count can drift. Re-checking corrects it, and is skipped while paused.")
             }
 
             Section {
