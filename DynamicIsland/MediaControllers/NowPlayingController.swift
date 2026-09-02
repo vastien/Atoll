@@ -35,8 +35,17 @@ final class NowPlayingController: ObservableObject, MediaControllerProtocol {
     /// so that estimate drifts, and at launch there is no anchor at all, which
     /// is why starting Atoll mid-song showed 0:00.
     ///
-    /// `get --now` answers with the position *as of this instant* rather than
-    /// the sender's own stale anchor, which is exactly the correction needed.
+    /// A plain `get` answers with the sender's own anchor: the position it last
+    /// published, paired with the instant it published it. That pair is
+    /// internally consistent, so the extrapolation downstream lands on the
+    /// right place -- a read of Spotify 52 seconds into a track returns an
+    /// elapsed of 0 against an anchor 52 seconds old, and 0 + 52 is correct.
+    ///
+    /// Deliberately not `--now`, which is the obvious-looking flag and is
+    /// wrong here: it advances the elapsed to this instant but still reports
+    /// the *original* anchor beside it. The same read then returns 32 seconds
+    /// against an anchor 32 seconds old, and the extrapolation adds that age
+    /// to a position already carrying it. Every poll doubled the position.
     func updatePlaybackInfo() async {
         guard let payload = await Self.readCurrentPayload() else { return }
         // Merged as a diff: this is a position correction, not a new track, and
@@ -55,7 +64,7 @@ final class NowPlayingController: ObservableObject, MediaControllerProtocol {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
-        process.arguments = [scriptURL.path, frameworkPath, "get", "--micros", "--now"]
+        process.arguments = [scriptURL.path, frameworkPath, "get", "--micros"]
 
         let pipe = Pipe()
         process.standardOutput = pipe
