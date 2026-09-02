@@ -1131,7 +1131,11 @@ extension Defaults.Keys {
     static let showFullBatteryHUD = Key<Bool>("showFullBatteryHUD", default: true)
     static let chargingBatteryHUDDuration = Key<Int>("chargingBatteryHUDDuration", default: 3)
     static let lowBatteryHUDDuration = Key<Int>("lowBatteryHUDDuration", default: 3)
-    static let fullBatteryHUDDuration = Key<Int>("fullBatteryHUDDuration", default: 3)
+    /// Five, not three, because the full-battery animation is staged: the
+    /// indicator withdraws at two seconds and the last beat only starts at
+    /// three, finishing a little after. Dismissing at three cut it off
+    /// exactly as it began.
+    static let fullBatteryHUDDuration = Key<Int>("fullBatteryHUDDuration", default: 5)
     static let lowBatteryHUDThreshold = Key<Int>("lowBatteryHUDThreshold", default: 20)
     static let fullBatteryHUDThreshold = Key<Int>("fullBatteryHUDThreshold", default: 100)
     static let lowBatteryHUDStyle = Key<BatteryNotificationStyle>("lowBatteryHUDStyle", default: .standard)
